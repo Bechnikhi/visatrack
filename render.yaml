@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: visatrack
+    runtime: python
+    buildCommand: "pip install -r requirements.txt && python manage.py migrate --noinput && python manage.py collectstatic --noinput"
+    startCommand: "gunicorn config.wsgi:application"
+    envVars:
+      - key: SECRET_KEY
+        value: visatrack-prod-secret-2026
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: visatrack-3ngv.onrender.com
+      - key: DATABASE_URL
+        value: sqlite:///db.sqlite3
+      - key: TELEGRAM_BOT_TOKEN
+        value: "8777492976:AAE3_wkBz2WHIJ3wrdfs1Rb31fya4idSmHo"
