@@ -1,0 +1,189 @@
+# docker-compose.yml
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       visatrack
+      POSTGRES_USER:     visatrack
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U visatrack"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Django API ───────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 30
+    environment:
+      DATABASE_URL:           postgres://visatrack:${DB_PASSWORD}@db:5432/visatrack
+      REDIS_URL:              redis://redis:6379/0
+      SECRET_KEY:             ${SECRET_KEY}
+      DEBUG:                  "False"
+      ALLOWED_HOSTS:          ${ALLOWED_HOSTS}
+      TELEGRAM_BOT_TOKEN:     ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_WEBHOOK_URL:   ${TELEGRAM_WEBHOOK_URL}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET}
+      WHATSAPP_ACCESS_TOKEN:  ${WHATSAPP_ACCESS_TOKEN}
+      WHATSAPP_PHONE_ID:      ${WHATSAPP_PHONE_ID}
+      EMAIL_HOST:             ${EMAIL_HOST}
+      EMAIL_HOST_USER:        ${EMAIL_HOST_USER}
+      EMAIL_HOST_PASSWORD:    ${EMAIL_HOST_PASSWORD}
+      STRIPE_SECRET_KEY:      ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET:  ${STRIPE_WEBHOOK_SECRET}
+      SITE_URL:               ${SITE_URL}
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    depends_on:
+      db:    { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports:
+      - "8000:8000"
+
+  # ── Celery Worker — Monitoring ────────────────
+  worker-monitoring:
+    build: .
+    restart: unless-stopped
+    command: celery -A config worker -l info -Q monitoring -c 4 --max-tasks-per-child=100
+    environment:
+      DATABASE_URL: postgres://visatrack:${DB_PASSWORD}@db:5432/visatrack
+      REDIS_URL:    redis://redis:6379/0
+      SECRET_KEY:   ${SECRET_KEY}
+    depends_on:
+      - db
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ── Celery Worker — Alertes ───────────────────
+  worker-alerts:
+    build: .
+    restart: unless-stopped
+    command: celery -A config worker -l info -Q alerts -c 8 --max-tasks-per-child=200
+    environment:
+      DATABASE_URL:             postgres://visatrack:${DB_PASSWORD}@db:5432/visatrack
+      REDIS_URL:                redis://redis:6379/0
+      SECRET_KEY:               ${SECRET_KEY}
+      TELEGRAM_BOT_TOKEN:       ${TELEGRAM_BOT_TOKEN}
+      WHATSAPP_ACCESS_TOKEN:    ${WHATSAPP_ACCESS_TOKEN}
+      WHATSAPP_PHONE_ID:        ${WHATSAPP_PHONE_ID}
+      EMAIL_HOST_USER:          ${EMAIL_HOST_USER}
+      EMAIL_HOST_PASSWORD:      ${EMAIL_HOST_PASSWORD}
+    depends_on:
+      - db
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ── Celery Beat (scheduler) ───────────────────
+  beat:
+    build: .
+    restart: unless-stopped
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    environment:
+      DATABASE_URL: postgres://visatrack:${DB_PASSWORD}@db:5432/visatrack
+      REDIS_URL:    redis://redis:6379/0
+      SECRET_KEY:   ${SECRET_KEY}
+    depends_on:
+      - db
+      - redis
+
+  # ── Celery Flower (monitoring UI) ────────────
+  flower:
+    build: .
+    restart: unless-stopped
+    command: celery -A config flower --port=5555 --basic_auth=${FLOWER_USER}:${FLOWER_PASSWORD}
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+
+  # ── Nginx (reverse proxy + static files) ────
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_files:/app/staticfiles:ro
+      - media_files:/app/media:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_files:
+  media_files:
+
+
+---
+# .env.example  — copier en .env et remplir les valeurs
+
+# Django
+SECRET_KEY=your-very-long-secret-key-here-change-in-production
+DEBUG=False
+ALLOWED_HOSTS=visatrack.app,www.visatrack.app,localhost
+SITE_URL=https://visatrack.app
+
+# Base de données
+DB_PASSWORD=strong-database-password
+
+# Telegram
+TELEGRAM_BOT_TOKEN=123456789:AABBCCDDEEFFaabbccddeeff
+TELEGRAM_WEBHOOK_URL=https://visatrack.app/api/bot/telegram/webhook/
+TELEGRAM_WEBHOOK_SECRET=random-webhook-secret-32-chars
+
+# WhatsApp Business API (Meta)
+WHATSAPP_ACCESS_TOKEN=EAAGm...
+WHATSAPP_PHONE_ID=1234567890
+
+# Email SMTP
+EMAIL_HOST=smtp.gmail.com
+EMAIL_HOST_USER=alertes@visatrack.app
+EMAIL_HOST_PASSWORD=app-specific-password
+
+# Stripe
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_PUBLISHABLE_KEY=pk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Flower (monitoring Celery)
+FLOWER_USER=admin
+FLOWER_PASSWORD=secure-flower-password

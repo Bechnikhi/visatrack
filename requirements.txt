@@ -1,0 +1,64 @@
+# VisaTrack — Dépendances Python
+# Installer avec : pip install -r requirements.txt
+
+# ── Django core ──────────────────────────────
+Django==5.0.4
+djangorestframework==3.15.1
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.3.1
+django-environ==0.11.2
+django-filter==24.2
+drf-spectacular==0.27.2          # Génération OpenAPI/Swagger
+
+# ── Base de données ──────────────────────────
+psycopg2-binary==2.9.9
+django-extensions==3.2.3
+
+# ── Celery + Redis ───────────────────────────
+celery==5.3.6
+redis==5.0.3
+django-celery-beat==2.6.0
+django-celery-results==2.5.1
+django-redis==5.4.0
+kombu==5.3.4
+
+# ── Scraping / HTTP ──────────────────────────
+httpx[http2]==0.27.0
+beautifulsoup4==4.12.3
+lxml==5.2.1
+playwright==1.43.0               # Pour les sites JS-heavy (optionnel)
+
+# ── Telegram Bot ─────────────────────────────
+python-telegram-bot==21.1.1
+
+# ── Email ────────────────────────────────────
+# Utilise le backend SMTP Django natif
+
+# ── Paiements ────────────────────────────────
+stripe==9.6.0
+
+# ── PDF / Factures ───────────────────────────
+weasyprint==62.3
+reportlab==4.1.0
+Pillow==10.3.0
+
+# ── Sécurité ─────────────────────────────────
+cryptography==42.0.5
+PyJWT==2.8.0
+django-ratelimit==4.1.0
+
+# ── Utilitaires ──────────────────────────────
+python-dateutil==2.9.0
+pytz==2024.1
+phonenumbers==8.13.35
+Markdown==3.6
+python-slugify==8.0.4
+requests==2.31.0
+
+# ── Serveur production ───────────────────────
+gunicorn==22.0.0
+whitenoise==6.6.0
+
+# ── Dev / Debug ──────────────────────────────
+django-debug-toolbar==4.3.0
+ipython==8.24.0
