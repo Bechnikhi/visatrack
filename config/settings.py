@@ -256,3 +256,7 @@ LOGGING = {
         "django":          {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }
+CSRF_TRUSTED_ORIGINS = [
+    "https://visatrack-3ngv.onrender.com",
+    "http://localhost:8000",
+]
