@@ -241,18 +241,12 @@ LOGGING = {
             "class":     "logging.StreamHandler",
             "formatter": "verbose",
         },
-        "file": {
-            "class":     "logging.handlers.RotatingFileHandler",
-            "filename":  BASE_DIR / "logs" / "visatrack.log",
-            "maxBytes":  10 * 1024 * 1024,  # 10 MB
-            "backupCount": 5,
-            "formatter": "verbose",
-        },
+        
     },
     "root": {"handlers": ["console"], "level": "INFO"},
     "loggers": {
-        "apps.monitoring": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
-        "apps.alerts":     {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
+        "apps.monitoring": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "apps.alerts":     {"handlers": ["console"], "level": "INFO", "propagate": False},
         "django":          {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
 }
