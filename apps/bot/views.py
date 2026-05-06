@@ -1,32 +1,54 @@
-# apps/bot/__init__.py
-# apps/bot/models.py  (app sans modèles propres)
 
-# apps/bot/views.py
-import json, logging, os
+import json
+import logging
+import os
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 logger = logging.getLogger(__name__)
 
+TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "changeme")
+
 
 @csrf_exempt
 @require_POST
 def telegram_webhook(request):
-    """Reçoit les updates Telegram et les traite."""
     secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if secret != os.environ.get("TELEGRAM_WEBHOOK_SECRET", "changeme"):
+    if secret != WEBHOOK_SECRET:
         return HttpResponse(status=403)
 
     try:
-        from telegram import Update
-        from apps.alerts.channels.telegram import get_bot_app
-        data   = json.loads(request.body)
-        update = Update.de_json(data, get_bot_app().bot)
-        import asyncio
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(get_bot_app().process_update(update))
-        loop.close()
+        import httpx
+        data = json.loads(request.body)
+
+        if "message" in data:
+            chat_id = data["message"]["chat"]["id"]
+            text = data["message"].get("text", "")
+
+            if text == "/start":
+                message = "👋 Bienvenue sur *VisaTrack* !\n\nJe surveille les créneaux visa et vous alerte dès qu'une place se libère.\n\n📌 *Commandes :*\n/start – Menu principal\n/dossiers – Mes dossiers\n/alertes – Historique alertes\n/abonnement – Mon abonnement\n/help – Aide"
+            elif text == "/help":
+                message = "🆘 *Aide VisaTrack*\n\nCe bot surveille les créneaux visa automatiquement.\n\nSupport : @visatrack_support"
+            elif text == "/dossiers":
+                message = "📁 *Vos dossiers actifs*\n\nConnectez-vous sur votre espace VisaTrack pour voir vos dossiers."
+            elif text == "/alertes":
+                message = "🔔 *Vos alertes*\n\nAucune alerte récente."
+            elif text == "/abonnement":
+                message = "💳 *Votre abonnement*\n\nGérez votre abonnement sur visatrack-3ngv.onrender.com"
+            else:
+                message = "Commande non reconnue. Tapez /help pour l'aide."
+
+            httpx.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": message,
+                    "parse_mode": "Markdown"
+                }
+            )
+
     except Exception as exc:
         logger.exception(f"[webhook] Erreur: {exc}")
         return HttpResponse(status=500)
