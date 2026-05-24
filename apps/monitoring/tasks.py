@@ -1,10 +1,4 @@
 # apps/monitoring/tasks.py
-"""
-Moteur de surveillance des créneaux visa.
-Celery Beat planifie check_all_centers() toutes les minutes.
-Pour chaque centre actif, une tâche individuelle check_center() est lancée.
-"""
-
 import logging
 import time
 from datetime import date, datetime
@@ -18,7 +12,6 @@ from django.utils import timezone
 
 from .models import AppointmentSlot, MonitoringLog, VisaCenter
 from .parsers import get_parser
-from apps.alerts.tasks import dispatch_alerts_for_slot
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +22,6 @@ logger = logging.getLogger(__name__)
 
 @shared_task(name="monitoring.check_all_centers", bind=True, max_retries=1)
 def check_all_centers(self):
-    """
-    Lancée par Celery Beat toutes les 60 secondes.
-    Sélectionne les centres dont l'intervalle est écoulé et crée une tâche par centre.
-    """
     now = timezone.now()
     centers = VisaCenter.objects.filter(is_active=True).select_related("country")
 
@@ -42,7 +31,6 @@ def check_all_centers(self):
             check_center.apply_async(
                 args=[center.id],
                 queue="monitoring",
-                # priorité haute pour VIP (interval=1)
                 priority=9 if center.check_interval <= 2 else 5,
             )
             launched += 1
@@ -52,7 +40,6 @@ def check_all_centers(self):
 
 
 def _should_check(center: VisaCenter, now: datetime) -> bool:
-    """Retourne True si le centre doit être vérifié maintenant."""
     if not center.last_checked_at:
         return True
     elapsed = (now - center.last_checked_at).total_seconds() / 60
@@ -72,10 +59,6 @@ def _should_check(center: VisaCenter, now: datetime) -> bool:
     time_limit=90,
 )
 def check_center(self, center_id: int):
-    """
-    Scrape un centre visa, détecte les nouveaux créneaux,
-    persiste en base et déclenche les alertes.
-    """
     try:
         center = VisaCenter.objects.select_related("country").get(id=center_id)
     except VisaCenter.DoesNotExist:
@@ -98,15 +81,14 @@ def check_center(self, center_id: int):
             "slots_new": len(new_slots),
         })
 
-        # Mettre à jour last_checked_at
         VisaCenter.objects.filter(id=center_id).update(last_checked_at=timezone.now())
 
-        # Déclencher les alertes pour chaque nouveau créneau
         for slot in new_slots:
+            from apps.alerts.tasks import dispatch_alerts_for_slot
             dispatch_alerts_for_slot.apply_async(
                 args=[slot.id],
                 queue="alerts",
-                priority=9,  # alertes = haute priorité
+                priority=9,
             )
 
         logger.info(
@@ -157,15 +139,28 @@ HEADERS = {
     "Cache-Control": "max-age=0",
 }
 
+
+def _fetch_slots(center: VisaCenter) -> list[dict]:
+    parser = get_parser(center.platform)
+
+    with httpx.Client(
+        headers=HEADERS,
+        timeout=httpx.Timeout(connect=10, read=20, write=10, pool=5),
+        follow_redirects=True,
+        http2=False,
+    ) as client:
+        url = center.url_check or center.url_booking
+        response = client.get(url)
+        response.raise_for_status()
+
+    return parser.parse(response.text, center)
+
+
 # ──────────────────────────────────────────────
 # PERSISTANCE DES CRÉNEAUX
 # ──────────────────────────────────────────────
 
 def _persist_slots(center: VisaCenter, slots_raw: list[dict]) -> list[AppointmentSlot]:
-    """
-    Insère les nouveaux créneaux et met à jour les existants.
-    Retourne uniquement les créneaux NOUVEAUX (pour déclencher alertes).
-    """
     new_slots = []
     today = date.today()
 
@@ -174,7 +169,6 @@ def _persist_slots(center: VisaCenter, slots_raw: list[dict]) -> list[Appointmen
             slot_date = slot_data.get("slot_date")
             slot_time = slot_data.get("slot_time")
 
-            # Ignorer dates passées
             if slot_date and slot_date < today:
                 continue
 
@@ -192,7 +186,6 @@ def _persist_slots(center: VisaCenter, slots_raw: list[dict]) -> list[Appointmen
             if created:
                 new_slots.append(slot)
             else:
-                # Mise à jour si le créneau existait mais était marqué "taken"
                 if slot.status == "taken":
                     slot.status = "available"
                     slot.taken_at = None
@@ -201,7 +194,6 @@ def _persist_slots(center: VisaCenter, slots_raw: list[dict]) -> list[Appointmen
                 else:
                     slot.save(update_fields=["last_seen_at"])
 
-        # Marquer comme "taken" les créneaux qui ont disparu de la page
         current_keys = {
             (s.get("slot_date"), s.get("slot_time")) for s in slots_raw
         }
@@ -218,9 +210,15 @@ def _persist_slots(center: VisaCenter, slots_raw: list[dict]) -> list[Appointmen
 
 @shared_task(name="monitoring.cleanup_old_slots")
 def cleanup_old_slots():
-    """Supprime les créneaux et logs de plus de 30 jours (lancé chaque nuit)."""
     cutoff = timezone.now() - timezone.timedelta(days=30)
     deleted_slots, _ = AppointmentSlot.objects.filter(slot_date__lt=date.today() - timezone.timedelta(days=1)).delete()
-    deleted_logs, _  = MonitoringLog.objects.filter(checked_at__lt=cutoff).delete()
+    deleted_logs, _ = MonitoringLog.objects.filter(checked_at__lt=cutoff).delete()
     logger.info(f"[cleanup] {deleted_slots} créneaux, {deleted_logs} logs supprimés")
     return {"slots": deleted_slots, "logs": deleted_logs}
+
+
+@shared_task(name="monitoring.mark_slot_taken")
+def mark_slot_taken(slot_id: int):
+    AppointmentSlot.objects.filter(id=slot_id).update(
+        status="taken", taken_at=timezone.now()
+    )
