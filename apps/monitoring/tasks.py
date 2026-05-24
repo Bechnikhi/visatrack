@@ -140,21 +140,28 @@ HEADERS = {
 }
 
 
+SCRAPER_API_KEY = "6589ca5d983198c579849443451d543e"
+
 def _fetch_slots(center: VisaCenter) -> list[dict]:
     parser = get_parser(center.platform)
     
-    import cloudscraper
-    scraper = cloudscraper.create_scraper(
-        browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'mobile': False
-        }
-    )
     url = center.url_check or center.url_booking
-    response = scraper.get(url, timeout=30)
-    response.raise_for_status()
-    return parser.parse(response.text, center)
+    
+    # Utiliser ScraperAPI pour VFS (protection Cloudflare)
+    if center.platform == "VFS":
+        import requests
+        scraper_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={url}&render=true"
+        response = requests.get(scraper_url, timeout=60)
+        response.raise_for_status()
+        return parser.parse(response.text, center)
+    else:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
+        response = scraper.get(url, timeout=30)
+        response.raise_for_status()
+        return parser.parse(response.text, center)
 # ──────────────────────────────────────────────
 # PERSISTANCE DES CRÉNEAUX
 # ──────────────────────────────────────────────
