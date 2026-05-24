@@ -143,24 +143,18 @@ HEADERS = {
 def _fetch_slots(center: VisaCenter) -> list[dict]:
     parser = get_parser(center.platform)
     
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                locale="fr-FR",
-            )
-            page = context.new_page()
-            url = center.url_check or center.url_booking
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            html = page.content()
-            browser.close()
-        return parser.parse(html, center)
-    except Exception as exc:
-        logger.error(f"Playwright error: {exc}")
-        raise
-
+    import cloudscraper
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'mobile': False
+        }
+    )
+    url = center.url_check or center.url_booking
+    response = scraper.get(url, timeout=30)
+    response.raise_for_status()
+    return parser.parse(response.text, center)
 # ──────────────────────────────────────────────
 # PERSISTANCE DES CRÉNEAUX
 # ──────────────────────────────────────────────
