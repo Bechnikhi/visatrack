@@ -165,7 +165,7 @@ def _fetch_slots(center: VisaCenter) -> list[dict]:
         headers=HEADERS,
         timeout=httpx.Timeout(connect=10, read=20, write=10, pool=5),
         follow_redirects=True,
-        http2=True,
+        http2=False,
     ) as client:
         url = center.url_check or center.url_booking
         response = client.get(url)
