@@ -143,24 +143,37 @@ HEADERS = {
 SCRAPER_API_KEY = "6589ca5d983198c579849443451d543e"
 
 def _fetch_slots(center: VisaCenter) -> list[dict]:
+    import os
+    import cloudscraper
     parser = get_parser(center.platform)
     url = center.url_check or center.url_booking
 
     if center.platform == "VFS":
-        import cloudscraper
         scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False},
-            delay=10
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
         )
-        scraper.headers.update({
-            'Referer': 'https://www.google.com/',
-            'Origin': 'https://visa.vfsglobal.com',
-        })
+        # Login VFS
+        if 'sen' in url:
+            email = os.environ.get('VFS_EMAIL_SN', '')
+            password = os.environ.get('VFS_PASSWORD_SN', '')
+        else:
+            email = os.environ.get('VFS_EMAIL_MA', '')
+            password = os.environ.get('VFS_PASSWORD_MA', '')
+
+        # Session login
+        login_url = 'https://visa.vfsglobal.com/api/account/login'
+        scraper.post(login_url, json={
+            'username': email,
+            'password': password,
+            'countryCode': 'sen' if 'sen' in url else 'mar',
+            'missionCode': 'fra' if 'fra' in url else 'ita',
+        }, timeout=30)
+
         response = scraper.get(url, timeout=60)
         response.raise_for_status()
         return parser.parse(response.text, center)
+
     else:
-        import cloudscraper
         scraper = cloudscraper.create_scraper(
             browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
         )
